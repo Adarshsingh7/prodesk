@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Three-Friend Chat</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    </head>
+    <body class="bg-gray-200">
+        <div class="flex h-screen">
+            <!-- Left Sidebar -->
+            <div class="w-1/3 bg-white p-4 border-r flex flex-col">
+                <h2 class="text-xl font-bold mb-4">Chat App</h2>
+
+                <!-- User selection -->
+                <label class="mb-2 text-sm text-gray-600"
+                    >Select your name:</label
+                >
+                <select id="usernameSelect" class="mb-4 p-2 border rounded">
+                    <option value="">-- Choose User --</option>
+                    <option value="Adarsh">Adarsh</option>
+                    <option value="Harsh">Harsh</option>
+                    <option value="Mridul">Mridul</option>
+                </select>
+                <button
+                    onclick="loginUser()"
+                    class="bg-blue-500 text-white px-3 py-2 rounded hover:bg-blue-600"
+                >
+                    Login
+                </button>
+
+                <!-- Friend list -->
+                <div id="friendList" class="mt-6 hidden">
+                    <h3 class="text-md font-semibold mb-2">Friends</h3>
+                    <ul>
+                        <li
+                            class="friend py-2 flex items-center justify-between hover:bg-gray-100 px-2 rounded cursor-pointer"
+                            onclick="openChat('Adarsh')"
+                        >
+                            <span>Adarsh</span>
+                            <span
+                                id="status-Adarsh"
+                                class="text-sm text-gray-400"
+                                >Offline</span
+                            >
+                        </li>
+                        <li
+                            class="friend py-2 flex items-center justify-between hover:bg-gray-100 px-2 rounded cursor-pointer"
+                            onclick="openChat('Harsh')"
+                        >
+                            <span>Harsh</span>
+                            <span
+                                id="status-Harsh"
+                                class="text-sm text-gray-400"
+                                >Offline</span
+                            >
+                        </li>
+                        <li
+                            class="friend py-2 flex items-center justify-between hover:bg-gray-100 px-2 rounded cursor-pointer"
+                            onclick="openChat('Mridul')"
+                        >
+                            <span>Mridul</span>
+                            <span
+                                id="status-Mridul"
+                                class="text-sm text-gray-400"
+                                >Offline</span
+                            >
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="w-2/3 p-4 flex flex-col">
+                <h3 id="chatWith" class="text-lg font-semibold mb-4">
+                    Select a friend to chat
+                </h3>
+
+                <div
+                    id="chatBox"
+                    class="flex-1 overflow-y-auto bg-white p-3 rounded shadow text-sm space-y-2 mb-4"
+                ></div>
+
+                <div class="flex gap-2">
+                    <input
+                        id="messageInput"
+                        type="text"
+                        placeholder="Type a message..."
+                        class="flex-1 p-2 border rounded"
+                    />
+                    <button
+                        onclick="sendMessage()"
+                        class="bg-green-500 text-white px-4 rounded hover:bg-green-600"
+                    >
+                        Send
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const socket = io("http://localhost:3000");
+
+            const ALL_USERS = ["Adarsh", "Harsh", "Mridul"];
+            let currentUser = "";
+            let chatWith = "";
+            let roomId = "";
+
+            function loginUser() {
+                const select = document.getElementById("usernameSelect");
+                currentUser = select.value;
+
+                if (!ALL_USERS.includes(currentUser)) {
+                    alert("Choose a valid user");
+                    return;
+                }
+
+                document
+                    .getElementById("friendList")
+                    .classList.remove("hidden");
+
+                // Update self status
+                socket.emit("join", { user: currentUser, roomId: "friends" });
+
+                // Inform others of online status
+                socket.emit("status", { user: currentUser, status: "online" });
+
+                document.getElementById(`status-${currentUser}`).textContent =
+                    "You";
+            }
+
+            function openChat(friendName) {
+                if (friendName === currentUser) return;
+                chatWith = friendName;
+                roomId = getRoomId(currentUser, chatWith);
+                document.getElementById("chatWith").textContent =
+                    `Chat with ${chatWith}`;
+                document.getElementById("chatBox").innerHTML = "";
+
+                // Fetch chat history
+                fetch(`http://localhost:3000/chats/${roomId}`)
+                    .then((res) => res.json())
+                    .then((data) => {
+                        data.forEach((msg) => {
+                            addMessage(msg.sender, msg.message, msg.timestamp);
+                        });
+                    });
+            }
+
+            function sendMessage() {
+                const input = document.getElementById("messageInput");
+                const message = input.value.trim();
+                if (!message || !roomId) return;
+
+                socket.emit("chat", { roomId, user: currentUser, message });
+                addMessage(currentUser, message, new Date().toISOString());
+                input.value = "";
+            }
+
+            function addMessage(sender, message, timestamp) {
+                const time = new Date(timestamp).toLocaleTimeString();
+                const bubble = document.createElement("div");
+                const isMe = sender === currentUser;
+
+                bubble.className = `flex ${isMe ? "justify-end" : "justify-start"}`;
+                bubble.innerHTML = `
+      <div class="max-w-[75%] px-3 py-2 rounded-lg ${isMe ? "bg-green-200" : "bg-gray-300"}">
+        <div class="text-xs text-gray-600">${sender} • ${time}</div>
+        <div>${message}</div>
+      </div>
+    `;
+                document.getElementById("chatBox").appendChild(bubble);
+                document.getElementById("chatBox").scrollTop =
+                    document.getElementById("chatBox").scrollHeight;
+            }
+
+            // Handle receiving messages
+            socket.on("chat", ({ user: sender, message, timestamp }) => {
+                if (
+                    sender === currentUser ||
+                    getRoomId(sender, currentUser) !== roomId
+                )
+                    return;
+                addMessage(sender, message, timestamp);
+            });
+
+            // Receive status updates
+            socket.on("status", ({ user, status }) => {
+                if (user !== currentUser) {
+                    document.getElementById(`status-${user}`).textContent =
+                        status === "online" ? "Online" : "Offline";
+                }
+            });
+
+            function getRoomId(a, b) {
+                return [a, b].sort().join("_");
+            }
+        </script>
+    </body>
+</html>
